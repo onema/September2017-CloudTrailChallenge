@@ -79,7 +79,7 @@ namespace CloudTrailer
             var createUserEvents = records.Where(x => x.EventName == "CreateUser");
             await SnsClient.PublishAsync(new PublishRequest {
                 Message = JsonConvert.SerializeObject(createUserEvents),
-                TopicArn = "arn:aws:sns:us-west-2:065150860170:test"
+                TopicArn = AlertTopicArn
             });
 
             // ### Boss level - Take mitigating action
