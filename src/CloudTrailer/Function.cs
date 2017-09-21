@@ -10,10 +10,12 @@ using Amazon.IdentityManagement.Model;
 using Amazon.Lambda.Core;
 using Amazon.Lambda.SNSEvents;
 using Amazon.S3;
+using Amazon.S3.Model;
 using Amazon.SimpleNotificationService;
 using Amazon.SimpleNotificationService.Model;
 using CloudTrailer.Models;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 
 // Assembly attribute to enable the Lambda function's JSON input to be converted into a .NET class.
@@ -21,6 +23,11 @@ using Newtonsoft.Json;
 
 namespace CloudTrailer
 {
+    public class CloudTrailModel {
+        public string s3Bucket { get; set; }
+        public List<string> s3ObjectKey { get; set; }
+    }
+    
     public class Function
     {
         private static readonly byte[] GZipHeaderBytes = {0x1f, 0x8b};
@@ -43,16 +50,46 @@ namespace CloudTrailer
             IamClient = new AmazonIdentityManagementServiceClient();
         }
 
-        public async Task FunctionHandler(SNSEvent evnt, ILambdaContext context)
+        public async Task FunctionHandler(SNSEvent snsEvent, ILambdaContext context)
         {
             // ### Level 1 - Create New Trail and Configure Lambda
-            context.Logger.LogLine(JsonConvert.SerializeObject(evnt));
+            context.Logger.LogLine(JsonConvert.SerializeObject(snsEvent));
 
+            
             // ### Level 2 - Retrieve Logs from S3
-
+            var crMessage = JsonConvert.DeserializeObject<CloudTrailModel>(snsEvent.Records.First().Sns.Message);
+            var bucketName = crMessage.s3Bucket;
+            var fileNames = crMessage.s3ObjectKey;
+            var records = new HashSet<CloudTrailEvent>();
+            foreach (string fileName in fileNames) {
+                var response = S3Client.GetObjectAsync(
+                    new GetObjectRequest {
+                        BucketName = bucketName, 
+                        Key = fileName
+                    }).Result;
+                var fileBytes = ReadStream(response.ResponseStream);
+                var record = ExtractCloudTrailRecordsAsync(context.Logger, fileBytes).Result;
+                foreach (var cloudTrailEvent in record.Records) {
+                    records.Add(cloudTrailEvent);
+                }
+                context.Logger.LogLine(record.Records.First().EventName);
+            };
+            
             // ### Level 3 - Filter for specific events and send alerts
+            var createUserEvents = records.Where(x => x.EventName == "CreateUser");
+            await SnsClient.PublishAsync(new PublishRequest {
+                Message = JsonConvert.SerializeObject(createUserEvents),
+                TopicArn = "arn:aws:sns:us-west-2:065150860170:test"
+            });
 
             // ### Boss level - Take mitigating action
+            foreach (var userEvent in createUserEvents) {
+                var username = userEvent.RequestParameters["userName"] as String;
+                context.Logger.LogLine($"Deleting user: {username}");
+                await IamClient.DeleteUserAsync(new DeleteUserRequest {
+                    UserName = username
+                });
+            }
         }
 
 
@@ -79,6 +116,20 @@ namespace CloudTrailer
                 var header = new byte[GZipHeaderBytes.Length];
                 Array.Copy(bytes, header, header.Length);
                 return header.SequenceEqual(GZipHeaderBytes);
+            }
+        }
+        
+        private static byte[] ReadStream(Stream responseStream)
+        {
+            byte[] buffer = new byte[16 * 1024];
+            using (MemoryStream ms = new MemoryStream())
+            {
+                int read;
+                while ((read = responseStream.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    ms.Write(buffer, 0, read);
+                }
+                return ms.ToArray();
             }
         }
     }
