@@ -1,6 +1,7 @@
 {
     "Version": "2012-10-17",
-    "Statement": [{
+    "Statement": [
+        {
             "Effect": "Allow",
             "Action": [
                 "logs:*"
@@ -12,7 +13,27 @@
             "Action": [
                 "s3:GetObject"
             ],
-            "Resource": "arn:aws:s3:::lambdasharp-<team#>-cloudtrail/*"
+            "Resource": [
+                "arn:aws:s3:::cloud-trail-bucket",
+                "arn:aws:s3:::cloud-trail-bucket/*"
+            ]
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "sns:Publish"
+            ],
+            "Resource": [
+                "arn:aws:sns:::topic-to-publish-notifications"
+            ]
+        },
+        {
+            "Sid": "Stmt1505977466627",
+            "Action": [
+                "iam:DeleteUser"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
         }
     ]
-}
+}}
